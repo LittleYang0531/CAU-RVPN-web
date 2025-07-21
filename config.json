@@ -1,0 +1,18 @@
+{
+    "server.listenHost": "0.0.0.0",
+    "server.listenPort": 8080,
+    "server.enableSSL": false,
+    "server.httpsCacert": "cert.pem",
+    "server.httpsPrivkey": "privkey.pem",
+    "server.threadNumber": 8,
+    "server.name": "http://127.0.0.1:8081/",
+    "vpn": {
+        "web": "vpn.cau.edu.cn",
+        "port": 443,
+        "ssl": true
+    },
+    "admin": {
+        "username": "",
+        "password": ""
+    }
+}

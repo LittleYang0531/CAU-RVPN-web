@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>EasyConnect VPN</title>
+    </head>
+    <body>
+        <p>Username: <input id="username" /></p>
+        <p>Password: <input id="password" type="password" /></p>
+        <button id="login">Login</button>
+        <script>
+            document.getElementById("login").onclick = async () => {
+                const username = document.getElementById("username").value;
+                const password = document.getElementById("password").value;
+                if (username && password) {
+                    var res = await fetch("/api/login", {
+                        method: "POST",
+                        body: "username=" + username + "&password=" + password,
+                    });
+                    var json = await res.json();
+                    if (json.success) {
+                        var setCookie = (key, value) => {
+                            var time = new Date();
+                            time.setTime(time.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days
+                            document.cookie = key + "=" + value + "; expires=" + time.toUTCString() + "; path=/";
+                        }
+                        setCookie("sessionId", json.sessionId);
+                        setCookie("twfId", json.twfId);
+                        setCookie("ip", json.ip);
+                        alert("Login successful!");
+                    }
+                }
+            }
+        </script>
+    </body>
+</html>
