@@ -314,6 +314,7 @@ struct IPPacket {
 void hexDump(char* msg, int len);
 int sessionCount = 0;
 void* VPNSession_work_thread(void* arg);
+time_t waitTime = 120 * 1000 * 1000;
 time_t clock3() {
 	return chrono::duration_cast<chrono::microseconds>(chrono::system_clock::now().time_since_epoch()).count();
 }
@@ -368,8 +369,9 @@ struct VPNSession {
     }
 
     IPPacket recvPacket(int port) {
-        while (packets[port].size() == 0 && !closed) usleep(1000 * 10);
-        if (closed) return IPPacket(NULL, NULL, NULL, 0);
+        time_t st = clock3();
+        while (packets[port].size() == 0 && !closed && clock3() - st < waitTime) usleep(1000 * 10);
+        if (!packets[port].size()) return IPPacket(NULL, 0);
         IPPacket packet = packets[port].front();
         packets[port].pop();
         return packet; 
@@ -712,7 +714,7 @@ struct VPNClient {
                 seqs.push_back(Packet.seq);
                 valid = true;
             }
-            packetNum++;
+            if (Packet.dataLength) packetNum++;
 
             if (Packet.FIN) { 
                 maxSeq = Packet.seq + Packet.dataLength;
@@ -827,6 +829,7 @@ struct VPNClient {
 
     // 被动 close
     void close2(uint32_t ack, uint32_t seq) {
+        cout << "closed" << endl;
         TCPPacket Packet4(srcPort, dstPort, NULL, 0);
         setOptionData(Packet4, getDefaultOptionData());
         Packet4.seq = ack;
@@ -847,6 +850,17 @@ struct VPNClient {
     void close() {
         if (closed) return;
         if (isSSL) SSL_shutdown(ssl);
+        // 发送 FIN
+        TCPPacket Packet(srcPort, dstPort, NULL, 0);
+        setOptionData(Packet, getDefaultOptionData());
+        Packet.seq = currSeq;
+        Packet.ack = currAck;
+        Packet.FIN = true;
+        Packet.ACK = true;
+        Packet.calcSum(srcIp, dstIp);
+        IPPacket ipPacket(srcIp, dstIp, Packet.toBytes(), Packet.getLength());
+        ipPacket.calcSum();
+        sendPacket(ipPacket);
         while (true) {
             IPPacket ipPacket3 = recvPacket();
             TCPPacket Packet3(ipPacket3.data, ipPacket3.dataLength);
@@ -854,6 +868,7 @@ struct VPNClient {
             // hexDump((char*)ipPacket3.toBytes(), ipPacket3.getLength());
             // Packet3.output();
             if (!Packet3.FIN) {
+                if (Packet3.ack == currSeq + 1) continue;
                 // 发送 ACK
                 TCPPacket Packet(srcPort, dstPort, NULL, 0);
                 setOptionData(Packet, getDefaultOptionData());
@@ -901,13 +916,12 @@ struct VPNClient {
         while (sslRecvBuffer.size() < targetLength) {
             int len = -1;
             char* recvData = SSL_recv(len);
-            if (recvData == NULL || len <= 0) break;
+            if (len <= 0) { delete[] recvData; break; }
             sslRecvBuffer.insert(sslRecvBuffer.end(), recvData, recvData + len);
             delete[] recvData;
         }
         realLength = min((int)sslRecvBuffer.size(), targetLength);
-        char* res = new char[targetLength];
-        memset(res, 0, targetLength);
+        char* res = new char[realLength];
         memcpy(res, sslRecvBuffer.data(), realLength);
         sslRecvBuffer.erase(sslRecvBuffer.begin(), sslRecvBuffer.begin() + realLength);
         return res;

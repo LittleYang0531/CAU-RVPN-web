@@ -1,4 +1,4 @@
 main
 make
 test*
-data/data.pcap
+data/*.pcap

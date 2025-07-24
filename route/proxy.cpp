@@ -83,6 +83,9 @@ auto UserProxy = [](client_conn conn, http_request request, param argv) {
             if (cookieString == "") continue;
             header.second = cookieString;
         }
+        if (key == "accept-encoding") {
+            continue;
+        }
         for (int i = 0; i < key.size(); i++) if (i == 0 || key[i - 1] == '-') key[i] = toupper(key[i]);
         requestHeader += key + ": " + header.second + "\r\n";
     }
@@ -163,13 +166,17 @@ auto UserProxy = [](client_conn conn, http_request request, param argv) {
             isHttps = true;
             port = 443;
         } else {
-            putRequest(conn, 403, __api_default_response);
-            Json::Value res;
-            res["code"] = 403;
-            res["success"] = false;
-            res["msg"] = "You are not allowed to access to " + destIpStr + ":" + to_string(port) + ".";
-            send(conn, json_encode(res));
+            auto header = __default_response;
+            header["location"] = (isHttps ? "https://" : "http://") + host + ":" + to_string(port) + path;
+            putRequest(conn, 307, header);
             exitRequest(conn);
+            // putRequest(conn, 403, __api_default_response);
+            // Json::Value res;
+            // res["code"] = 403;
+            // res["success"] = false;
+            // res["msg"] = "You are not allowed to access to " + destIpStr + ":" + to_string(port) + ".";
+            // send(conn, json_encode(res));
+            // exitRequest(conn);
             return;
         }
     }
@@ -211,7 +218,7 @@ auto UserProxy = [](client_conn conn, http_request request, param argv) {
     while (true) {
         int len = -1;
         char* data = vpnClient.recvData(1, len);
-        if (vpnClient.error) {
+        if (vpnClient.error || len <= 0) {
             vpnClient.close();
             putRequest(conn, 500, __api_default_response);
             Json::Value res;
@@ -221,12 +228,12 @@ auto UserProxy = [](client_conn conn, http_request request, param argv) {
             send(conn, json_encode(res));
             exitRequest(conn);
         }
-        if (len == 0) exit(0);
         res.push_back(data[0]);
         delete[] data;
         if (res.size() >= 4 && res.substr(res.size() - 4) == "\r\n\r\n") break;
     }
     cout << "UserProxy: Response Header (len = " << res.size() << ")" << endl;
+    // cout << res << endl;
     // for (auto v : dns) {
         res = str_replace("HttpOnly", "", res);
         int pt = 0;
@@ -235,6 +242,7 @@ auto UserProxy = [](client_conn conn, http_request request, param argv) {
             if (pt == string::npos) break;
             pt += 6;
             int pt2 = res.find(";", pt);
+            if (pt2 == string::npos) pt2 = res.find("\r\n", pt);
             res = res.replace(pt, pt2 - pt, "");
             pt++;
         }
@@ -291,8 +299,59 @@ auto UserProxy = [](client_conn conn, http_request request, param argv) {
 
     // 内容替换
     // for (auto v : dns) {
-        // realData = str_replace("http://", appConfig["server.name"].asString() + "http://", realData);
-        // realData = str_replace("https://", appConfig["server.name"].asString() + "https://", realData);
+    auto httpReplace = [&](string s) {
+        string result = s;
+        int st = 0, wh1 = result.find("http://", st), wh2 = result.find("https://", st);
+        // cout << result << " " << from << " " << wh << endl;
+        while (wh1 != string::npos || wh2 != string::npos) {
+            if (wh1 != string::npos && (wh2 == string::npos || wh1 < wh2)) {
+                result.replace(wh1, 7, appConfig["server.name"].asString() + "http://");
+                st = wh1 + appConfig["server.name"].asString().size() + 7;
+            } else {
+                result.replace(wh2, 8, appConfig["server.name"].asString() + "https://");
+                st = wh2 + appConfig["server.name"].asString().size() + 8;
+            }
+            wh1 = result.find("http://", st), wh2 = result.find("https://", st);
+        } 
+        return result;
+    };
+    if (dataLength == -1) {
+        // auto res = explode("\r\n", realData);
+        // for (int i = 0; i + 1 < res.size(); i += 2) {
+        //     res[i + 1] = httpReplace(res[i + 1]);
+        //     int len = res[i + 1].size();
+        //     res[i] = "";
+        //     if (len == 0) res[i] = "0";
+        //     while (len) {
+        //         res[i] = char(len % 16 < 10 ? '0' + (len % 16) : 'A' + (len % 16 - 10)) + res[i];
+        //         len /= 16;
+        //     }
+        //     cout << res[i] << " " << res[i + 1].size() << endl;
+        // }
+        int pt = 0;
+        string result = "";
+        while (true) {
+            // cout << pt << " " << realData.size() << endl;
+            string tmp = realData.substr(pt, realData.find("\r\n", pt) - pt).c_str();
+            int len = 0;
+            for (int i = 0; i < tmp.size(); i++) tmp[i] = toupper(tmp[i]), len = 16 * len + (isdigit(tmp[i]) ? tmp[i] - '0' : tmp[i] - 'A' + 10);
+            // cout << tmp << " " << len << endl;
+            if (len == 0) { result += "0\r\n\r\n"; break; }
+            pt = realData.find("\r\n", pt) + 2;
+            string content = realData.substr(pt, len);
+            pt += len + 2;
+            content = httpReplace(content);
+            len = content.size();
+            string lens = "";
+            while (len) {
+                lens = char(len % 16 < 10 ? '0' + (len % 16) : 'A' + (len % 16 - 10)) + lens;
+                len /= 16;
+            }
+            result += lens + "\r\n" + content + "\r\n";
+            // cout << lens << " " << content.size() << endl;
+        }
+        realData = result;
+    }
     // }
     // cout << "UserProxy: Content (len = " << realData.size() << ")" << endl;
 
@@ -306,6 +365,7 @@ auto UserProxy = [](client_conn conn, http_request request, param argv) {
     // putRequest(conn, 200, __default_response);
     send(conn, res);
     send(conn, realData);
+    // cout << res << " " << realData.size() << endl;
     vpnClient.close();
     exitRequest(conn);
 };
