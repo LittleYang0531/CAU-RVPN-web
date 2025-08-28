@@ -1,9 +1,15 @@
 #include<bits/stdc++.h>
+#ifdef __linux__
 #include<sys/un.h>
 #include<sys/stat.h>
 #include<sys/syscall.h>
 #include<unistd.h>
 #include<arpa/inet.h>
+#include<netdb.h>
+#include<netinet/tcp.h>
+#else
+#include<Windows.h>
+#endif
 using namespace std;
 #include"log.h"
 #include"json.h"

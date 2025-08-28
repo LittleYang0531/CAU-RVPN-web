@@ -1333,6 +1333,7 @@ void* ws_work_thread(void* arg) {
  */
 void thread_pool::work_thread() {
     int id = this->get_thread_id();
+    srand(time(NULL) + id); // 密码的 Windows 下每个线程都要设置随机种子
     writeLog(LOG_LEVEL_DEBUG, "Created thread #%d", id);
     while (1) {
         #ifdef __linux__

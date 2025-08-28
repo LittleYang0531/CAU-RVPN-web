@@ -4,11 +4,13 @@ const string errorKey = [](){
     return key;
 }();
 
+#ifndef __linux__
+#define disableSocketUnix
+#endif
+
 struct Connection {
     bool isUnix;
     int conn;
-    sockaddr_in addr;
-    sockaddr_un sock;
 
     bool send(string msg) {
         int64_t len = msg.size();
@@ -38,6 +40,8 @@ struct Connection {
         for (int i = 0; i < 8; i++) msgLen <<= 8, msgLen += (unsigned char)len[i];
         delete[] len;
 
+        if (msgLen == 0) return "";
+
         char *msg = new char[msgLen];
         int64_t recv = 0;
         while(true) {
@@ -61,25 +65,25 @@ struct Server {
     bool isUnix;
     int sock, conn;
     sockaddr_in clientAddr;
+    #ifndef disableSocketUnix
     sockaddr_un clientSock;
+    #endif
 
     Server(string host, int port): isUnix(false) {
         sockaddr_in serverAddr;
 
         #ifdef __linux__
         bzero(&serverAddr, sizeof(serverAddr));
-        // #elif __windows__
-        // WORD w_req = MAKEWORD(2, 2);
-        // WSADATA wsadata; int err;
-        // err = WSAStartup(w_req, &wsadata);
-        // if (err != 0) {
-        //     writeLog(LOG_LEVEL_ERROR, "Failed to initialize SOCKET!");
-        //     exit(3);
-        // }
-        // if (LOBYTE(wsadata.wVersion) != 2 || HIBYTE(wsadata.wHighVersion) != 2) {
-        //     writeLog(LOG_LEVEL_ERROR, "SOCKET version is not correct!");
-        //     exit(3);
-        // }
+        #else
+        WORD w_req = MAKEWORD(2, 2);
+        WSADATA wsadata; int err;
+        err = WSAStartup(w_req, &wsadata);
+        if (err != 0) {
+
+        }
+        if (LOBYTE(wsadata.wVersion) != 2 || HIBYTE(wsadata.wHighVersion) != 2) {
+
+        }
         #endif
 
         // 创建套接字
@@ -108,6 +112,7 @@ struct Server {
         }
     }
     
+    #ifndef disableSocketUnix
     Server(string sockPath): isUnix(true) {
         // 一定要先把上一个 sock 文件删了
         unlink(sockPath.c_str());
@@ -116,18 +121,6 @@ struct Server {
 
         #ifdef __linux__
         bzero(&serverAddr, sizeof(serverAddr));
-        // #elif __windows__
-        // WORD w_req = MAKEWORD(2, 2);
-        // WSADATA wsadata; int err;
-        // err = WSAStartup(w_req, &wsadata);
-        // if (err != 0) {
-        //     writeLog(LOG_LEVEL_ERROR, "Failed to initialize SOCKET!");
-        //     exit(3);
-        // }
-        // if (LOBYTE(wsadata.wVersion) != 2 || HIBYTE(wsadata.wHighVersion) != 2) {
-        //     writeLog(LOG_LEVEL_ERROR, "SOCKET version is not correct!");
-        //     exit(3);
-        // }
         #endif
 
         // 创建套接字
@@ -150,19 +143,28 @@ struct Server {
             
         }
     }
+    #endif
 
     Connection accept() {
-        socklen_t clientAddrLength = isUnix ? sizeof clientSock : sizeof clientAddr;
+        #ifdef __linux__
+        uint32_t clientAddrLength;
+        #else
+        int clientAddrLength;
+        #endif
+        #ifndef disableSocketUnix
+        clientAddrLength = isUnix ? sizeof clientSock : sizeof clientAddr;
         if (isUnix) conn = ::accept(sock, (struct sockaddr*)&clientSock, &clientAddrLength);
         else conn = ::accept(sock, (struct sockaddr*)&clientAddr, &clientAddrLength);
+        #else
+        clientAddrLength = sizeof clientAddr;
+        conn = ::accept(sock, (struct sockaddr*)&clientAddr, &clientAddrLength);
+        #endif
         if (conn < 0) {
 
         }
         return Connection({
             isUnix: isUnix,
-            conn: conn,
-            addr: clientAddr,
-            sock: clientSock
+            conn: conn
         });
     }
 };
@@ -171,7 +173,9 @@ struct Client {
     bool isUnix;
     int sock, conn;
     sockaddr_in serverAddr;
+    #ifndef disableSocketUnix
     sockaddr_un serverSock;
+    #endif
 
     Client(string host, int port): isUnix(false) {
         serverAddr.sin_family = AF_INET;
@@ -183,6 +187,7 @@ struct Client {
         }
     }
 
+    #ifndef disableSocketUnix
     Client(string sockPath): isUnix(true) {
         serverSock.sun_family = AF_LOCAL;
         strcpy(serverSock.sun_path, sockPath.c_str());
@@ -191,18 +196,21 @@ struct Client {
 
         }
     }
+    #endif
 
     Connection connect() {
+        #ifndef disableSocketUnix
         if (isUnix) conn = ::connect(sock, (struct sockaddr*)&serverSock, sizeof(serverSock));
         else conn = ::connect(sock, (struct sockaddr*)&serverAddr, sizeof(serverAddr));
+        #else
+        conn = ::connect(sock, (struct sockaddr*)&serverAddr, sizeof(serverAddr));
+        #endif
         if (conn < 0) {
 
         }
         return Connection({
             isUnix: isUnix,
-            conn: sock,
-            addr: serverAddr,
-            sock: serverSock
+            conn: sock
         });
     }
 };
@@ -277,7 +285,6 @@ struct HttpRequest {
     }
 };
 
-#include<netdb.h>
 string getSessionId(SSL* ssl) {
     SSL_SESSION* session = SSL_get_session(ssl);
     if (!session) return "";
@@ -326,6 +333,12 @@ HttpRequest EasyProtocal(string host, int port, bool isSSL = false, bool ignoreS
     }();
     Client client(ip, port);
     Connection conn2 = client.connect();
+    int optval = 1;
+    setsockopt(conn2.conn, SOL_SOCKET, SO_KEEPALIVE, &optval, sizeof(int));
+    optval = 15; setsockopt(conn2.conn, IPPROTO_TCP, TCP_KEEPIDLE, &optval, sizeof(int));
+    optval = 5; setsockopt(conn2.conn, IPPROTO_TCP, TCP_KEEPINTVL, &optval, sizeof(int));
+    optval = 3; setsockopt(conn2.conn, IPPROTO_TCP, TCP_KEEPCNT, &optval, sizeof(int));
+
     SSL_CTX *ctx = SSL_CTX_new(TLSv1_1_client_method());
     SSL* ssl;
     SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);

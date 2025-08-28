@@ -370,7 +370,12 @@ struct VPNSession {
 
     IPPacket recvPacket(int port) {
         time_t st = clock3();
-        while (packets[port].size() == 0 && !closed && clock3() - st < waitTime) usleep(1000 * 10);
+        while (packets[port].size() == 0 && !closed && clock3() - st < waitTime) 
+        #ifdef __linux__
+            usleep(1000 * 10);
+        #else 
+            Sleep(10);
+        #endif
         if (!packets[port].size()) return IPPacket(NULL, 0);
         IPPacket packet = packets[port].front();
         packets[port].pop();
