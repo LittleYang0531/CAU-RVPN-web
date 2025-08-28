@@ -9,6 +9,8 @@
 #include<netinet/tcp.h>
 #else
 #include<Windows.h>
+#include<winsock2.h>
+#include<mstcpip.h>
 #endif
 using namespace std;
 #include"log.h"

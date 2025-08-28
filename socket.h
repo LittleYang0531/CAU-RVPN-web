@@ -333,11 +333,32 @@ HttpRequest EasyProtocal(string host, int port, bool isSSL = false, bool ignoreS
     }();
     Client client(ip, port);
     Connection conn2 = client.connect();
+    #ifdef __linux__
     int optval = 1;
     setsockopt(conn2.conn, SOL_SOCKET, SO_KEEPALIVE, &optval, sizeof(int));
     optval = 15; setsockopt(conn2.conn, IPPROTO_TCP, TCP_KEEPIDLE, &optval, sizeof(int));
     optval = 5; setsockopt(conn2.conn, IPPROTO_TCP, TCP_KEEPINTVL, &optval, sizeof(int));
     optval = 3; setsockopt(conn2.conn, IPPROTO_TCP, TCP_KEEPCNT, &optval, sizeof(int));
+    #else
+    tcp_keepalive keepalive;
+    keepalive.onoff = 1;
+    keepalive.keepalivetime = 15 * 1000;
+    keepalive.keepaliveinterval = 5 * 1000;
+    // keepalive.keepaliveprobes = 3;
+
+    DWORD bytesReturned;
+    WSAIoctl(
+        conn2.conn,
+        SIO_KEEPALIVE_VALS,
+        &keepalive,
+        sizeof(keepalive),
+        NULL,
+        0,
+        &bytesReturned,
+        NULL,
+        NULL
+    );
+    #endif
 
     SSL_CTX *ctx = SSL_CTX_new(TLSv1_1_client_method());
     SSL* ssl;
